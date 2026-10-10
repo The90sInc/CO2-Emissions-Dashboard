@@ -1,0 +1,8 @@
+fastapi[standard]>=0.110
+uvicorn[standard]>=0.29
+pandas>=2.0
+# only needed to rebuild data/processed.csv (build_data.py)
+geopy>=2.4
+pycountry>=23.12
+pycountry-convert>=0.7.2
+shapely>=2.0

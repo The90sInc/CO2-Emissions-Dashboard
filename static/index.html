@@ -1,0 +1,491 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fossil Fuel CO₂ Emissions Dashboard</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+  :root{
+    --bg:#f5f6f8; --panel:#fff; --ink:#1c2128; --muted:#5f6b7a; --line:#e3e6eb; --nodata:#dfe3e8;
+    --accent:#7a4a2b; --accent-soft:#f3ece6; --radius:12px;
+    --font: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);font:14px/1.45 var(--font)}
+  button{font:inherit;color:inherit;cursor:pointer}
+  :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  .app{display:grid;grid-template-rows:auto auto 1fr;height:100vh;min-height:620px}
+
+  header{background:var(--panel);border-bottom:1px solid var(--line);padding:12px 20px;display:flex;flex-wrap:wrap;gap:12px 24px;align-items:center}
+  h1{font-size:18px;margin:0;font-weight:650;letter-spacing:-.01em}
+  h1 small{display:block;font-weight:400;color:var(--muted);font-size:12px;margin-top:1px}
+  .fuels{display:flex;flex-wrap:wrap;gap:8px;margin-left:auto}
+  .fuel{border:1px solid var(--line);background:var(--panel);border-radius:999px;padding:7px 14px;display:flex;align-items:center;gap:8px;transition:.15s}
+  .fuel i{width:10px;height:10px;border-radius:50%;background:var(--c)}
+  .fuel span small{display:block;color:var(--muted);font-size:11px;line-height:1.1}
+  .fuel:hover{border-color:var(--c)}
+  .fuel[aria-pressed=true]{background:var(--c);border-color:var(--c);color:#fff}
+  .fuel[aria-pressed=true] i{background:#fff}
+  .fuel[aria-pressed=true] span small{color:rgba(255,255,255,.85)}
+
+  .controls{background:var(--panel);border-bottom:1px solid var(--line);padding:8px 20px;display:flex;flex-wrap:wrap;gap:10px 22px;align-items:center}
+  .group{display:flex;align-items:center;gap:6px}
+  .group>label,.lbl{color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.05em;margin-right:2px}
+  .chip{border:1px solid var(--line);background:#fff;border-radius:8px;padding:5px 11px}
+  .chip:hover{border-color:var(--accent)}
+  .chip[aria-pressed=true]{background:var(--accent-soft);border-color:var(--accent);color:var(--accent);font-weight:600}
+  .slider{display:flex;align-items:center;gap:10px;flex:1;min-width:280px}
+  .slider input[type=range]{flex:1;accent-color:var(--accent)}
+  .yearbox{font-variant-numeric:tabular-nums;font-weight:650;font-size:16px;min-width:54px;text-align:right}
+  .play{width:32px;height:32px;border-radius:50%;border:1px solid var(--line);background:#fff;display:grid;place-items:center}
+  .play:hover{border-color:var(--accent)}
+
+  main{display:grid;grid-template-columns:minmax(0,1fr) 400px;gap:14px;padding:14px 20px 20px;min-height:0}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius)}
+  .mapwrap{position:relative;overflow:hidden;min-height:420px}
+  #map{position:absolute;inset:0;background:#e9eef3}
+  .legend{position:absolute;left:12px;bottom:12px;z-index:500;background:rgba(255,255,255,.94);border:1px solid var(--line);border-radius:10px;padding:8px 12px;width:240px}
+  .legend .bar{height:10px;border-radius:5px;margin:6px 0 3px}
+  .legend .ticks{display:flex;justify-content:space-between;font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums}
+  .legend .nd{display:flex;align-items:center;gap:6px;margin-top:6px;font-size:11px;color:var(--muted)}
+  .legend .nd i{width:12px;height:12px;background:var(--nodata);border:1px solid #c5ccd4;border-radius:3px}
+  .maptitle{position:absolute;left:12px;top:12px;z-index:500;background:rgba(255,255,255,.94);border:1px solid var(--line);border-radius:10px;padding:6px 12px;max-width:70%}
+  .maptitle b{font-size:14px}
+  .maptitle div{color:var(--muted);font-size:12px}
+  .resetbtn{position:absolute;right:12px;top:12px;z-index:500;background:#fff;border:1px solid var(--line);border-radius:8px;padding:6px 11px}
+  .resetbtn:hover{border-color:var(--accent)}
+
+  aside{display:flex;flex-direction:column;gap:14px;min-height:0;overflow-y:auto;padding-right:2px}
+  .pad{padding:14px 16px}
+  h2{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin:0 0 10px;font-weight:600}
+  .kpis{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .kpi{background:var(--bg);border-radius:10px;padding:10px 12px}
+  .kpi b{display:block;font-size:21px;font-variant-numeric:tabular-nums;letter-spacing:-.02em}
+  .kpi span{color:var(--muted);font-size:12px}
+  .chartbox{position:relative;height:300px}
+  .controw{display:grid;grid-template-columns:104px 1fr 54px;align-items:center;gap:8px;padding:4px 6px;border-radius:8px;width:100%;background:none;border:0;text-align:left}
+  .controw:hover,.controw[aria-pressed=true]{background:var(--accent-soft)}
+  .track{background:var(--bg);height:9px;border-radius:5px;overflow:hidden}
+  .track i{display:block;height:100%;background:var(--accent);border-radius:5px}
+  .controw em{font-style:normal;color:var(--muted);text-align:right;font-variant-numeric:tabular-nums;font-size:12px}
+  .note{color:var(--muted);font-size:12px}
+
+  .back{border:0;background:none;color:var(--accent);padding:0;margin-bottom:8px;font-weight:600}
+  .ctitle{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
+  .ctitle h3{margin:0;font-size:22px;letter-spacing:-.02em}
+  .tag{font-size:11px;background:var(--bg);border:1px solid var(--line);border-radius:999px;padding:1px 8px;color:var(--muted)}
+  .mixbar{display:flex;height:14px;border-radius:7px;overflow:hidden;background:var(--bg);margin:6px 0 8px}
+  .mixbar i{display:block}
+  .mixleg{display:grid;grid-template-columns:1fr 1fr;gap:3px 12px;font-size:12px}
+  .mixleg span{display:flex;align-items:center;gap:6px}
+  .mixleg i{width:9px;height:9px;border-radius:50%}
+  .mixleg b{margin-left:auto;font-variant-numeric:tabular-nums;font-weight:600}
+  .leaflet-tooltip.tip{border-radius:8px;border:1px solid var(--line);box-shadow:0 2px 10px rgba(0,0,0,.12);padding:6px 10px;font:13px/1.4 var(--font)}
+  .tip b{font-size:14px}
+  .tip .m{color:var(--muted)}
+  .err{padding:10px 14px;background:#fdecea;color:#8a1f17;border-radius:8px;margin:12px 20px}
+
+  @media (max-width: 1000px){
+    .app{height:auto}
+    main{grid-template-columns:1fr}
+    .mapwrap{height:60vh}
+    aside{overflow:visible}
+    .fuels{margin-left:0}
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <h1>Fossil Fuel CO₂ Emissions<small>Carbon emissions by country, 1751–2014 · pick a fuel, a continent, then click a country to zoom in</small></h1>
+    <div class="fuels" id="fuels" role="group" aria-label="Fuel type"></div>
+  </header>
+
+  <div class="controls">
+    <div class="group" id="continents" role="group" aria-label="Continent"><label>View</label></div>
+    <div class="group" id="modes" role="group" aria-label="Measure">
+      <label>Measure</label>
+      <button class="chip" data-mode="year" aria-pressed="true">Single year</button>
+      <button class="chip" data-mode="cumulative" aria-pressed="false">Cumulative</button>
+    </div>
+    <div class="slider">
+      <button class="play" id="play" aria-label="Play timeline" title="Play timeline">▶</button>
+      <input type="range" id="year" min="1751" max="2014" value="2014" aria-label="Year">
+      <span class="yearbox" id="yearbox">2014</span>
+    </div>
+  </div>
+
+  <div id="errbox"></div>
+
+  <main>
+    <section class="card mapwrap">
+      <div id="map"></div>
+      <div class="maptitle"><b id="mtitle"></b><div id="msub"></div></div>
+      <button class="resetbtn" id="reset">Reset view</button>
+      <div class="legend" id="legend"></div>
+    </section>
+
+    <aside>
+      <div id="overview" style="display:contents">
+        <div class="card pad"><div class="kpis" id="kpis"></div></div>
+        <div class="card pad">
+          <h2 id="toptitle">Top 10</h2>
+          <div class="chartbox"><canvas id="topchart"></canvas></div>
+          <div class="note" style="margin-top:6px">† defunct state, not shown on the map. Click a bar to zoom to the country.</div>
+        </div>
+        <div class="card pad">
+          <h2>By continent</h2>
+          <div id="conts"></div>
+        </div>
+      </div>
+
+      <div id="detail" class="card pad" style="display:none">
+        <button class="back" id="back">← Back to overview</button>
+        <div class="ctitle"><h3 id="dname"></h3><span class="tag" id="dcont"></span></div>
+        <div class="note" id="dspan" style="margin-bottom:10px"></div>
+        <div class="kpis" id="dkpis" style="margin-bottom:14px"></div>
+        <h2>History by fuel</h2>
+        <div class="chartbox" style="height:240px"><canvas id="linechart"></canvas></div>
+        <h2 style="margin-top:14px" id="mixtitle">Fuel mix</h2>
+        <div class="mixbar" id="mixbar"></div>
+        <div class="mixleg" id="mixleg"></div>
+      </div>
+    </aside>
+  </main>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<script>
+"use strict";
+const FUEL_COLOR = {solid:"#7a4a2b", liquid:"#1f5fa8", gas:"#0e8a7d", cement:"#7b4fa3", flaring:"#d1560f", total:"#37404c"};
+const MIX_KEYS = ["solid","liquid","gas","cement","flaring"];
+const CONT_VIEW = {            // [[south, west],[north, east]]
+  "World": null,
+  "Africa": [[-36,-19],[38,52]], "Asia": [[-10,25],[78,146]], "Europe": [[34,-25],[72,45]],
+  "North America": [[7,-170],[75,-50]], "South America": [[-56,-82],[13,-34]], "Oceania": [[-48,110],[2,180]],
+};
+// Basemap tiles (no API key needed). Set url to "" for a plain map with no tiles at all.
+const TILES = {
+  url: "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}",
+  attribution: "Tiles © Esri — Esri, HERE, Garmin, FAO, NOAA, USGS", maxZoom: 16,
+};
+const state = {fuel:"solid", continent:"World", year:2014, mode:"year", selected:null};
+let META, DATA, byIso = {}, byKey = {}, geoLayer, markerLayer, map, topChart, lineChart, loadToken = 0;
+const cache = new Map();
+
+const $ = s => document.querySelector(s);
+const esc = s => String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+function fmt(v){
+  if (v == null) return "–";
+  if (v >= 100) return Math.round(v).toLocaleString();
+  if (v >= 1) return v.toFixed(1);
+  if (v >= 0.01) return v.toFixed(2);
+  return v > 0 ? "<0.01" : "0";
+}
+const pct = v => v == null ? "–" : (v >= .1 ? (v*100).toFixed(0) : (v*100).toFixed(1)) + "%";
+const hex2rgb = h => [1,3,5].map(i => parseInt(h.slice(i,i+2),16));
+function ramp(t){                       // light -> fuel colour, sqrt-scaled by caller
+  const a = [243,244,246], b = hex2rgb(FUEL_COLOR[state.fuel]);
+  return "rgb(" + a.map((x,i) => Math.round(x + (b[i]-x)*t)).join(",") + ")";
+}
+const norm = v => DATA.max_value ? Math.sqrt(Math.max(v,0)/DATA.max_value) : 0;
+const fuelMeta = () => META.fuels.find(f => f.key === state.fuel);
+const periodText = () => state.mode === "year" ? String(state.year) : `${META.year_min}–${state.year}`;
+function showError(msg){ $("#errbox").innerHTML = msg ? `<div class="err">${esc(msg)}</div>` : ""; }
+const api = async p => { const r = await fetch(p); if (!r.ok) throw new Error(`${p} → ${r.status}`); return r.json(); };
+
+/* ---------------------------------------------------------------- setup */
+async function init(){
+  try {
+    const [meta, geo] = await Promise.all([api("/api/meta"), api("/api/world.geojson")]);
+    META = meta;
+    $("#year").min = META.year_min; $("#year").max = META.year_max; $("#year").value = state.year = META.year_max;
+    buildControls();
+    buildMap(geo);
+    applyTheme();
+    await load();
+  } catch(e){ showError("Could not load the dashboard data. " + e.message); }
+}
+
+function buildControls(){
+  $("#fuels").innerHTML = META.fuels.map(f =>
+    `<button class="fuel" data-fuel="${f.key}" style="--c:${FUEL_COLOR[f.key]}" aria-pressed="${f.key===state.fuel}">
+       <i></i><span>${esc(f.label)}<small>${esc(f.hint)}</small></span></button>`).join("");
+  $("#fuels").addEventListener("click", e => {
+    const b = e.target.closest(".fuel"); if (!b) return;
+    state.fuel = b.dataset.fuel;
+    document.querySelectorAll(".fuel").forEach(x => x.setAttribute("aria-pressed", x === b));
+    applyTheme(); load();
+  });
+
+  const cont = $("#continents");
+  cont.insertAdjacentHTML("beforeend", Object.keys(CONT_VIEW).map(c =>
+    `<button class="chip" data-c="${c}" aria-pressed="${c===state.continent}">${c}</button>`).join(""));
+  cont.addEventListener("click", e => { const b = e.target.closest(".chip"); if (b) setContinent(b.dataset.c); });
+
+  $("#modes").addEventListener("click", e => {
+    const b = e.target.closest(".chip"); if (!b) return;
+    state.mode = b.dataset.mode;
+    document.querySelectorAll("#modes .chip").forEach(x => x.setAttribute("aria-pressed", x === b));
+    load();
+  });
+  let raf = 0;
+  $("#year").addEventListener("input", e => {
+    state.year = +e.target.value; $("#yearbox").textContent = state.year;
+    cancelAnimationFrame(raf); raf = requestAnimationFrame(load);
+  });
+  $("#play").addEventListener("click", togglePlay);
+  $("#reset").addEventListener("click", () => { closeDetail(); setContinent(state.continent); });
+  $("#back").addEventListener("click", closeDetail);
+}
+
+function applyTheme(){
+  const c = FUEL_COLOR[state.fuel];
+  const r = document.documentElement.style;
+  r.setProperty("--accent", c);
+  const [R,G,B] = hex2rgb(c); r.setProperty("--accent-soft", `rgba(${R},${G},${B},.10)`);
+}
+
+let timer = null;
+function togglePlay(){
+  const btn = $("#play");
+  if (timer){ clearInterval(timer); timer = null; btn.textContent = "▶"; return; }
+  if (state.year >= META.year_max) state.year = META.year_min;
+  btn.textContent = "❚❚";
+  timer = setInterval(async () => {
+    if (state.year >= META.year_max){ togglePlay(); return; }
+    state.year++; $("#year").value = state.year; $("#yearbox").textContent = state.year;
+    await load();
+  }, 220);
+}
+
+/* ------------------------------------------------------------------ map */
+const isoOf = p => (p.ISO_A3_EH && p.ISO_A3_EH !== "-99") ? p.ISO_A3_EH : p.ADM0_A3;
+
+function buildMap(geo){
+  map = L.map("map", {worldCopyJump:true, minZoom:2, zoomSnap:.25, zoomControl:true}).setView([22,10], 2);
+  if (TILES.url) L.tileLayer(TILES.url, {attribution: TILES.attribution, maxZoom: TILES.maxZoom}).addTo(map);
+  geoLayer = L.geoJSON(geo, {
+    style: styleFeature,
+    onEachFeature: (f, layer) => {
+      const iso = isoOf(f.properties);
+      layer.bindTooltip("", {sticky:true, className:"tip"});
+      layer.on({
+        mouseover: e => { layer.setTooltipContent(tipHtml(iso, f.properties.NAME)); if (clickable(iso)) e.target.setStyle({weight:2, color:"#222"}); },
+        mouseout: () => geoLayer.resetStyle(layer),
+        click: () => { const r = byIso[iso]; if (r && inView(r)) selectCountry(r.key, layer); },
+      });
+    },
+  }).addTo(map);
+  markerLayer = L.layerGroup().addTo(map);
+}
+
+const inView = r => state.continent === "World" || r.continent === state.continent;
+const clickable = iso => { const r = byIso[iso]; return r && inView(r); };
+
+function styleFeature(f){
+  const r = byIso[isoOf(f.properties)];
+  const base = {weight:.6, color:"#8b95a1", fillOpacity:.88, opacity:1};
+  if (!r) return {...base, fillColor:"#e2e5e9", fillOpacity:.45, dashArray:"2 3"};
+  if (!inView(r)) return {...base, fillColor: r.value == null ? "#e2e5e9" : ramp(norm(r.value)), fillOpacity:.14, opacity:.3};
+  if (r.value == null) return {...base, fillColor:"#e2e5e9", fillOpacity:.55, dashArray:"2 3"};
+  return {...base, fillColor: ramp(norm(r.value))};
+}
+
+function tipHtml(iso, fallbackName){
+  const r = byIso[iso];
+  if (!r) return `<b>${esc(fallbackName)}</b><div class="m">No emissions record</div>`;
+  if (r.value == null) return `<b>${esc(r.country)}</b><div class="m">No record for ${periodText()}</div>`;
+  return `<b>${esc(r.country)}</b><div>${fmt(r.value)} ${DATA.unit}</div>
+          <div class="m">${pct(r.share)} of world · rank #${r.rank}</div>`;
+}
+
+function renderMap(){
+  geoLayer.setStyle(styleFeature);
+  markerLayer.clearLayers();
+  const polyCodes = new Set(geoLayer.getLayers().map(l => isoOf(l.feature.properties)));
+  DATA.countries.forEach(r => {
+    if (r.historical || r.lat == null || r.value == null || polyCodes.has(r.iso3) || !inView(r)) return;
+    const m = L.circleMarker([r.lat, r.lon], {
+      radius: 4 + 11*norm(r.value), weight:1, color:"#444", fillColor: ramp(Math.max(norm(r.value),.15)), fillOpacity:.9,
+    }).bindTooltip(tipHtml(r.iso3, r.country), {className:"tip", sticky:true});
+    m.on("click", () => selectCountry(r.key, null, [r.lat, r.lon]));
+    markerLayer.addLayer(m);
+  });
+}
+
+function setContinent(c){
+  state.continent = c;
+  document.querySelectorAll("#continents .chip").forEach(x => x.setAttribute("aria-pressed", x.dataset.c === c));
+  const v = CONT_VIEW[c];
+  if (v) map.flyToBounds(v, {duration:.8, padding:[10,10]}); else map.flyTo([22,10], 2, {duration:.8});
+  if (DATA){ renderMap(); renderSide(); }
+}
+
+/* --------------------------------------------------------------- loading */
+async function load(){
+  const token = ++loadToken;
+  const key = `${state.fuel}|${state.year}|${state.mode}`;
+  try {
+    let d = cache.get(key);
+    if (!d){ d = await api(`/api/map?fuel=${state.fuel}&year=${state.year}&mode=${state.mode}`); cache.set(key, d); }
+    if (token !== loadToken) return;                       // a newer request superseded this one
+    DATA = d; byIso = {}; byKey = {};
+    d.countries.forEach(r => { byKey[r.key] = r; if (r.iso3) byIso[r.iso3] = r; });
+    showError("");
+    renderMap(); renderSide(); renderLegend();
+    if (state.selected) loadDetail();
+  } catch(e){ showError("Could not load emissions data. " + e.message); }
+}
+
+/* ------------------------------------------------------------- side panel */
+function renderSide(){
+  const f = fuelMeta();
+  const inC = DATA.countries.filter(r => r.value != null && (state.continent === "World" || r.continent === state.continent))
+                            .sort((a,b) => b.value - a.value);
+  const scopeTotal = inC.reduce((s,r) => s + r.value, 0);
+  const lead = inC[0];
+  $("#mtitle").textContent = `${f.label} — ${f.hint}`;
+  $("#msub").textContent = `${state.mode === "year" ? "Emissions in" : "Cumulative emissions"} ${periodText()} · ${state.continent === "World" ? "worldwide" : state.continent} · ${DATA.unit}`;
+
+  $("#kpis").innerHTML = `
+    <div class="kpi"><b>${fmt(scopeTotal)}</b><span>${DATA.unit} ${state.continent === "World" ? "worldwide" : "in " + esc(state.continent)}</span></div>
+    <div class="kpi"><b>${lead ? esc(lead.country) : "–"}</b><span>highest emitter${lead ? " · " + fmt(lead.value) + " " + DATA.unit : ""}</span></div>
+    <div class="kpi"><b>${lead && scopeTotal ? pct(lead.value / scopeTotal) : "–"}</b><span>share held by the leader</span></div>
+    <div class="kpi"><b>${inC.length}</b><span>countries with data</span></div>`;
+
+  $("#toptitle").textContent = `Top ${Math.min(10, inC.length)} · ${f.label.toLowerCase()} · ${periodText()}`;
+  drawTop(inC.slice(0,10));
+
+  const maxC = Math.max(...DATA.continents.map(c => c.total), 1e-9);
+  $("#conts").innerHTML = DATA.continents.map(c =>
+    `<button class="controw" data-c="${c.continent}" aria-pressed="${c.continent === state.continent}">
+       <span>${c.continent}</span><span class="track"><i style="width:${(c.total/maxC*100).toFixed(1)}%"></i></span>
+       <em>${pct(c.share)}</em></button>`).join("");
+  document.querySelectorAll(".controw").forEach(b => b.onclick = () => setContinent(b.dataset.c));
+}
+
+function drawTop(rows){
+  const labels = rows.map(r => r.country + (r.historical ? " †" : ""));
+  const data = rows.map(r => +r.value.toFixed(3));
+  const color = FUEL_COLOR[state.fuel];
+  if (!topChart){
+    topChart = new Chart($("#topchart"), {
+      type:"bar",
+      data:{labels, datasets:[{data, backgroundColor:color, borderRadius:4, barThickness:18}]},
+      options:{
+        indexAxis:"y", maintainAspectRatio:false, animation:{duration:250},
+        plugins:{legend:{display:false}, tooltip:{callbacks:{label: c => `${fmt(c.parsed.x)} ${DATA.unit}`}}},
+        scales:{x:{grid:{color:"#eef0f3"}, ticks:{callback:v => fmt(+v)}}, y:{grid:{display:false}}},
+        onClick:(e, els) => { if (els.length){ const r = topChart.$rows[els[0].index]; if (r) selectCountry(r.key); } },
+        onHover:(e, els) => { e.native.target.style.cursor = els.length ? "pointer" : "default"; },
+      },
+    });
+  }
+  topChart.$rows = rows;
+  topChart.data.labels = labels;
+  topChart.data.datasets[0].data = data;
+  topChart.data.datasets[0].backgroundColor = color;
+  topChart.update();
+}
+
+function renderLegend(){
+  const m = DATA.max_value, ticks = [0, .25, .5, .75, 1].map(t => t*t*m);
+  const grad = [0,.25,.5,.75,1].map(t => ramp(t) + " " + (t*100) + "%").join(",");
+  $("#legend").innerHTML = `
+    <div class="lbl">${DATA.unit} · ${periodText()}</div>
+    <div class="bar" style="background:linear-gradient(90deg,${grad})"></div>
+    <div class="ticks">${ticks.map(v => `<span>${fmt(v)}</span>`).join("")}</div>
+    <div class="nd"><i></i>No record for this period</div>`;
+}
+
+/* --------------------------------------------------------- country detail */
+function selectCountry(key, layer, latlng){
+  state.selected = key;
+  const r = byKey[key];
+  if (layer) map.flyToBounds(layer.getBounds(), {maxZoom:6, padding:[30,30], duration:.8});
+  else if (latlng) map.flyTo(latlng, 7, {duration:.8});
+  else if (r){
+    const l = geoLayer.getLayers().find(x => isoOf(x.feature.properties) === r.iso3);
+    if (l) map.flyToBounds(l.getBounds(), {maxZoom:6, padding:[30,30], duration:.8});
+    else if (r.lat != null) map.flyTo([r.lat, r.lon], 6, {duration:.8});
+  }
+  $("#overview").style.display = "none";
+  $("#detail").style.display = "block";
+  loadDetail();
+}
+
+function closeDetail(){
+  state.selected = null;
+  $("#detail").style.display = "none";
+  $("#overview").style.display = "contents";
+  const v = CONT_VIEW[state.continent];
+  if (v) map.flyToBounds(v, {duration:.8, padding:[10,10]}); else map.flyTo([22,10], 2, {duration:.8});
+}
+
+async function loadDetail(){
+  const key = state.selected; if (!key) return;
+  try {
+    const d = await api(`/api/country/${encodeURIComponent(key)}?fuel=${state.fuel}&year=${state.year}&mode=${state.mode}`);
+    if (state.selected !== key) return;
+    renderDetail(d);
+  } catch(e){ showError("Could not load country details. " + e.message); }
+}
+
+function renderDetail(d){
+  const r = byKey[d.key], f = fuelMeta();
+  $("#dname").textContent = d.country + (d.historical ? " †" : "");
+  $("#dcont").textContent = d.continent;
+  $("#dspan").textContent = `Records ${d.first_year}–${d.last_year}${d.historical ? " · defunct state" : ""}`;
+  const v = r && r.value;
+  $("#dkpis").innerHTML = `
+    <div class="kpi"><b>${v == null ? "–" : fmt(v)}</b><span>${DATA.unit} · ${f.label.toLowerCase()} · ${periodText()}</span></div>
+    <div class="kpi"><b>${r && r.rank ? "#" + r.rank : "–"}</b><span>world rank${r && r.continent_rank ? " · #" + r.continent_rank + " in " + esc(d.continent) : ""}</span></div>
+    <div class="kpi"><b>${r ? pct(r.share) : "–"}</b><span>share of world total</span></div>
+    <div class="kpi"><b>${d.peak ? d.peak.year : "–"}</b><span>peak year${d.peak ? " · " + fmt(d.peak.value) + " " + DATA.unit : ""}</span></div>`;
+
+  // line chart: all fuels, the selected one emphasised
+  const yearLine = {id:"yearLine", afterDatasetsDraw(c){
+    const x = c.scales.x.getPixelForValue(state.year), a = c.chartArea;
+    if (x < a.left || x > a.right) return;
+    const g = c.ctx; g.save(); g.strokeStyle = "rgba(28,33,40,.45)"; g.setLineDash([4,3]);
+    g.beginPath(); g.moveTo(x, a.top); g.lineTo(x, a.bottom); g.stroke(); g.restore();
+  }};
+  const sets = (state.fuel === "total" ? ["total"].concat(MIX_KEYS) : MIX_KEYS).map(k => ({
+    label: META.fuels.find(x => x.key === k).label,
+    data: d.series.years.map((y,i) => ({x:y, y:d.series[k][i]})),
+    borderColor: FUEL_COLOR[k], backgroundColor: FUEL_COLOR[k], pointRadius:0, tension:.2,
+    borderWidth: k === state.fuel ? 3 : 1.3, order: k === state.fuel ? 0 : 1,
+    borderDash: k === "total" ? [5,3] : [],
+  }));
+  if (lineChart) lineChart.destroy();
+  lineChart = new Chart($("#linechart"), {
+    type:"line", data:{datasets:sets}, plugins:[yearLine],
+    options:{
+      maintainAspectRatio:false, animation:false, parsing:false,
+      interaction:{mode:"nearest", axis:"x", intersect:false},
+      plugins:{legend:{position:"bottom", labels:{boxWidth:10, boxHeight:10, usePointStyle:true}},
+               tooltip:{callbacks:{label: c => `${c.dataset.label}: ${fmt(c.parsed.y)} ${DATA.unit}`}}},
+      scales:{x:{type:"linear", min:META.year_min > d.first_year ? META.year_min : d.first_year, max:d.last_year,
+                 ticks:{callback:v => String(v), maxTicksLimit:7}, grid:{display:false}},
+              y:{beginAtZero:true, ticks:{callback:v => fmt(+v)}, grid:{color:"#eef0f3"},
+                 title:{display:true, text:DATA.unit}}},
+    },
+  });
+
+  // fuel mix for the selected period
+  const tot = MIX_KEYS.reduce((s,k) => s + d.mix[k], 0);
+  $("#mixtitle").textContent = `Fuel mix · ${periodText()}`;
+  $("#mixbar").innerHTML = tot ? MIX_KEYS.map(k =>
+    `<i style="width:${d.mix[k]/tot*100}%;background:${FUEL_COLOR[k]}" title="${k}"></i>`).join("") : "";
+  $("#mixleg").innerHTML = tot ? MIX_KEYS.map(k =>
+    `<span><i style="background:${FUEL_COLOR[k]}"></i>${META.fuels.find(x => x.key === k).label}<b>${pct(d.mix[k]/tot)}</b></span>`).join("")
+    : `<span class="note">No emissions recorded for this period.</span>`;
+}
+
+init();
+</script>
+</body>
+</html>
