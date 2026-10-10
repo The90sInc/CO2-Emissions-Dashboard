@@ -13,33 +13,35 @@ ROOT = Path(__file__).resolve().parent.parent
 DATA = ROOT / "data"
 STATIC = ROOT / "static"
 
-# CDIAC reports values in thousand metric tons of carbon (kt C). The API serves
-# million metric tons of carbon (Mt C): kt / 1000.
-UNIT = "Mt C"
-KT_TO_MT = 1 / 1000
+# Global Carbon Budget 2025 (v15) reports million tonnes of CO2 (Mt CO2) - served as-is.
+UNIT = "Mt CO₂"
+KT_TO_MT = 1
 
 FUELS = {
-    "solid":   {"label": "Solid fuel",   "hint": "Coal",             "column": "solid"},
-    "liquid":  {"label": "Liquid fuel",  "hint": "Oil & petroleum",  "column": "liquid"},
-    "gas":     {"label": "Gas fuel",     "hint": "Natural gas",      "column": "gas"},
-    "cement":  {"label": "Cement",       "hint": "Cement production", "column": "cement"},
-    "flaring": {"label": "Gas flaring",  "hint": "Flared gas",       "column": "flaring"},
-    "total":   {"label": "All sources",  "hint": "Total emissions",  "column": "total"},
+    "solid":   {"label": "Coal",        "hint": "Solid fuel",        "column": "solid"},
+    "liquid":  {"label": "Oil",         "hint": "Liquid fuel",       "column": "liquid"},
+    "gas":     {"label": "Gas",         "hint": "Natural gas",       "column": "gas"},
+    "cement":  {"label": "Cement",      "hint": "Cement production", "column": "cement"},
+    "flaring": {"label": "Flaring",     "hint": "Gas flaring",       "column": "flaring"},
+    "other":   {"label": "Other",       "hint": "Other industry",    "column": "other"},
+    "total":   {"label": "All sources", "hint": "Total emissions",   "column": "total"},
 }
-FuelKey = Literal["solid", "liquid", "gas", "cement", "flaring", "total"]
+MIX_KEYS = ("solid", "liquid", "gas", "cement", "flaring", "other")
+FuelKey = Literal["solid", "liquid", "gas", "cement", "flaring", "other", "total"]
 CONTINENTS = ["Africa", "Asia", "Europe", "North America", "South America", "Oceania"]
 
 if not (DATA / "processed.csv").exists():
     raise RuntimeError("data/processed.csv missing - run `python build_data.py` first.")
 
 DF = pd.read_csv(DATA / "processed.csv")
-NUM_COLS = ["total", "solid", "liquid", "gas", "cement", "flaring"]
-DF[NUM_COLS] = DF[NUM_COLS].clip(lower=0)  # a few negative revisions exist in the source data
+NUM_COLS = ["total", "solid", "liquid", "gas", "cement", "flaring", "other"]
+DF[NUM_COLS] = DF[NUM_COLS].clip(lower=0)  # blanks (NaN) mean "no record" and stay NaN
+_has_total = DF[DF["total"].notna()]
 ENTITIES = (DF.groupby("key")
               .agg(iso3=("iso3", "first"), country=("country", "first"),
                    continent=("continent", "first"), historical=("historical", "first"),
-                   lat=("lat", "first"), lon=("lon", "first"),
-                   first_year=("year", "min"), last_year=("year", "max"))
+                   lat=("lat", "first"), lon=("lon", "first"))
+              .join(_has_total.groupby("key")["year"].agg(first_year="min", last_year="max"))
               .reset_index())
 YEAR_MIN, YEAR_MAX = int(DF["year"].min()), int(DF["year"].max())
 
@@ -53,12 +55,12 @@ def clean(v):
 
 
 def period_values(fuel: str, year: int, mode: str) -> pd.DataFrame:
-    """One row per entity with its value (Mt C) for the chosen fuel and period."""
+    """One row per entity with its value (Mt CO2) for the chosen fuel and period."""
     col = FUELS[fuel]["column"]
     if mode == "year":
         sub = DF[DF["year"] == year][["key", col]]
     else:  # cumulative from the first record up to and including `year`
-        sub = DF[DF["year"] <= year].groupby("key", as_index=False)[col].sum()
+        sub = DF[DF["year"] <= year].groupby("key", as_index=False)[col].sum(min_count=1)
     sub = sub.rename(columns={col: "value"})
     sub["value"] = sub["value"] * KT_TO_MT
     return sub
@@ -72,8 +74,8 @@ def meta():
         "year_min": YEAR_MIN,
         "year_max": YEAR_MAX,
         "unit": UNIT,
-        "unit_note": "Million metric tons of carbon (source data: thousand tons of carbon; "
-                     "multiply by 3.664 for CO2 mass).",
+        "unit_note": "Million tonnes of CO2 from fossil fuels and industry (Global Carbon Budget 2025). "
+                     "Excludes international aviation and shipping.",
     }
 
 
@@ -84,12 +86,7 @@ def map_data(fuel: FuelKey = "solid",
     """Emissions per country for the map, ranking panel and continent summary."""
     vals = period_values(fuel, year, mode)
     df = ENTITIES.merge(vals, on="key", how="left")
-    # only entities that exist in the chosen period carry a value; others are "no data"
-    if mode == "year":
-        has = df["first_year"].le(year) & df["last_year"].ge(year) & df["value"].notna()
-    else:
-        has = df["first_year"].le(year) & df["value"].notna()
-    df.loc[~has, "value"] = None
+    # blank (NaN) values = "no record for this period"
 
     world_total = float(df["value"].sum())
     df = df.sort_values("value", ascending=False, na_position="last")
@@ -134,17 +131,16 @@ def country(key: str, fuel: FuelKey = "solid",
     sub = DF[DF["key"] == key].sort_values("year")
     series = {"years": sub["year"].tolist()}
     for k, f in FUELS.items():
-        series[k] = [round(v * KT_TO_MT, 4) for v in sub[f["column"]]]
+        series[k] = [None if pd.isna(v) else round(float(v) * KT_TO_MT, 4) for v in sub[f["column"]]]
 
     col = FUELS[fuel]["column"]
-    peak_row = sub.loc[sub[col].idxmax()] if len(sub) and sub[col].max() > 0 else None
+    peak_row = sub.loc[sub[col].idxmax()] if sub[col].notna().any() and sub[col].max() > 0 else None
     # mix for the chosen period
     if mode == "year":
         window = sub[sub["year"] == year]
     else:
         window = sub[sub["year"] <= year]
-    mix = {k: round(float(window[FUELS[k]["column"]].sum() * KT_TO_MT), 3)
-           for k in ("solid", "liquid", "gas", "cement", "flaring")}
+    mix = {k: round(float(window[FUELS[k]["column"]].sum() * KT_TO_MT), 3) for k in MIX_KEYS}
     pc = sub[sub["year"] == year]["per_capita"]
     return {
         "key": key, "iso3": clean(e.iso3), "country": e.country, "continent": e.continent,

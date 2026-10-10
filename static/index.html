@@ -98,7 +98,7 @@
 <body>
 <div class="app">
   <header>
-    <h1>Fossil Fuel CO₂ Emissions<small>Carbon emissions by country, 1751–2014 · pick a fuel, a continent, then click a country to zoom in</small></h1>
+    <h1>Fossil Fuel CO₂ Emissions<small>CO₂ emissions by country, 1750–2024 · pick a fuel, a continent, then click a country to zoom in</small></h1>
     <div class="fuels" id="fuels" role="group" aria-label="Fuel type"></div>
   </header>
 
@@ -111,8 +111,8 @@
     </div>
     <div class="slider">
       <button class="play" id="play" aria-label="Play timeline" title="Play timeline">▶</button>
-      <input type="range" id="year" min="1751" max="2014" value="2014" aria-label="Year">
-      <span class="yearbox" id="yearbox">2014</span>
+      <input type="range" id="year" min="1750" max="2024" value="2024" aria-label="Year">
+      <span class="yearbox" id="yearbox">2024</span>
     </div>
   </div>
 
@@ -132,7 +132,7 @@
         <div class="card pad">
           <h2 id="toptitle">Top 10</h2>
           <div class="chartbox"><canvas id="topchart"></canvas></div>
-          <div class="note" style="margin-top:6px">† defunct state, not shown on the map. Click a bar to zoom to the country.</div>
+          <div class="note" style="margin-top:6px">Click a bar to zoom to the country.</div>
         </div>
         <div class="card pad">
           <h2>By continent</h2>
@@ -159,8 +159,8 @@
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
 <script>
 "use strict";
-const FUEL_COLOR = {solid:"#7a4a2b", liquid:"#1f5fa8", gas:"#0e8a7d", cement:"#7b4fa3", flaring:"#d1560f", total:"#37404c"};
-const MIX_KEYS = ["solid","liquid","gas","cement","flaring"];
+const FUEL_COLOR = {solid:"#7a4a2b", liquid:"#1f5fa8", gas:"#0e8a7d", cement:"#7b4fa3", flaring:"#d1560f", other:"#6b8e23", total:"#37404c"};
+const MIX_KEYS = ["solid","liquid","gas","cement","flaring","other"];
 const CONT_VIEW = {            // [[south, west],[north, east]]
   "World": null,
   "Africa": [[-36,-19],[38,52]], "Asia": [[-10,25],[78,146]], "Europe": [[34,-25],[72,45]],
@@ -171,7 +171,7 @@ const TILES = {
   url: "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}",
   attribution: "Tiles © Esri — Esri, HERE, Garmin, FAO, NOAA, USGS", maxZoom: 16,
 };
-const state = {fuel:"solid", continent:"World", year:2014, mode:"year", selected:null};
+const state = {fuel:"solid", continent:"World", year:2024, mode:"year", selected:null};
 let META, DATA, byIso = {}, byKey = {}, geoLayer, markerLayer, map, topChart, lineChart, loadToken = 0;
 const cache = new Map();
 
@@ -262,7 +262,8 @@ function togglePlay(){
 }
 
 /* ------------------------------------------------------------------ map */
-const isoOf = p => (p.ISO_A3_EH && p.ISO_A3_EH !== "-99") ? p.ISO_A3_EH : p.ADM0_A3;
+const ISO_ALIAS = {KOS:"KSV"};   // Natural Earth code -> dataset code (Kosovo)
+const isoOf = p => { const c = (p.ISO_A3_EH && p.ISO_A3_EH !== "-99") ? p.ISO_A3_EH : p.ADM0_A3; return ISO_ALIAS[c] || c; };
 
 function buildMap(geo){
   map = L.map("map", {worldCopyJump:true, minZoom:2, zoomSnap:.25, zoomControl:true}).setView([22,10], 2);
@@ -468,7 +469,7 @@ function renderDetail(d){
       interaction:{mode:"nearest", axis:"x", intersect:false},
       plugins:{legend:{position:"bottom", labels:{boxWidth:10, boxHeight:10, usePointStyle:true}},
                tooltip:{callbacks:{label: c => `${c.dataset.label}: ${fmt(c.parsed.y)} ${DATA.unit}`}}},
-      scales:{x:{type:"linear", min:META.year_min > d.first_year ? META.year_min : d.first_year, max:d.last_year,
+      scales:{x:{type:"linear", min:d.first_year, max:d.last_year,
                  ticks:{callback:v => String(v), maxTicksLimit:7}, grid:{display:false}},
               y:{beginAtZero:true, ticks:{callback:v => fmt(+v)}, grid:{color:"#eef0f3"},
                  title:{display:true, text:DATA.unit}}},
